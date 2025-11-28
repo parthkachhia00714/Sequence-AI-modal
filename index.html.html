@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LLM Prompt Audit Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Chosen Palette: Soothing Beige and Slate -->
+    <!-- Application Structure Plan: The application is designed as an interactive dashboard. This structure was chosen to transform the static CSV data into a dynamic, explorable tool for developers and project managers. The core components are: 1) A header with key performance indicators (KPIs) for an immediate overview. 2) A filtering control panel to allow users to slice the data by category and model, which is a primary user task. 3) A responsive grid of 'prompt cards' for scannable, high-level information. 4) A modal view for detailed prompt content, which keeps the main interface clean and prevents information overload. 5) A summary chart to visualize model distribution. This task-oriented design (filter, scan, drill-down) is more intuitive and efficient for auditing purposes than reading a linear document. -->
+    <!-- Visualization & Content Choices: 
+        - Total Prompts/Categories (KPIs): Goal=Inform -> Presentation=Stat cards -> Interaction=None. Justification: Quick, high-level summary. Method=HTML/Tailwind.
+        - Prompt Data Filtering: Goal=Organize -> Presentation=Dropdown selectors -> Interaction=User selection triggers JS filter. Justification: Intuitive way to narrow down the dataset. Method=JS DOM manipulation.
+        - Model Distribution: Goal=Compare -> Presentation=Horizontal Bar Chart -> Interaction=Hover tooltips. Justification: Best for comparing counts across a few categories. Library=Chart.js (Canvas).
+        - Prompt Details: Goal=Inform -> Presentation=Modal Dialog with pre-formatted text -> Interaction=Click button to open/close. Justification: Provides deep information without losing context of the main dashboard. Method=JS/HTML/Tailwind.
+        - CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+    <style>
+        body {
+            background-color: #F5F5DC; 
+            color: #2d3748; 
+        }
+        .chart-container {
+            position: relative;
+            width: 100%;
+            max-width: 800px;
+            margin-left: auto;
+            margin-right: auto;
+            height: 300px;
+            max-height: 350px;
+        }
+        @media (min-width: 768px) {
+            .chart-container {
+                height: 350px;
+            }
+        }
+        .modal-content {
+            max-height: 80vh;
+        }
+    </style>
+</head>
+<body class="font-sans antialiased">
+    <div id="app" class="container mx-auto p-4 md:p-8">
+        
+        <header class="text-center mb-8">
+            <h1 class="text-4xl font-bold text-slate-800">LLM Prompt Audit Dashboard</h1>
+            <p class="text-lg text-slate-600 mt-2">An interactive overview of the prompts used in the Sequence Jobs Platform.</p>
+        </header>
+
+        <section id="kpis" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+            <div class="bg-white p-6 rounded-lg shadow-md text-center">
+                <h3 class="text-xl font-semibold text-slate-700">Total Prompts</h3>
+                <p id="total-prompts" class="text-4xl font-bold text-blue-600 mt-2">0</p>
+            </div>
+            <div class="bg-white p-6 rounded-lg shadow-md text-center">
+                <h3 class="text-xl font-semibold text-slate-700">Categories</h3>
+                <p id="total-categories" class="text-4xl font-bold text-blue-600 mt-2">0</p>
+            </div>
+            <div class="bg-white p-6 rounded-lg shadow-md text-center">
+                <h3 class="text-xl font-semibold text-slate-700">Last Audit Date</h3>
+                <p class="text-4xl font-bold text-blue-600 mt-2">2025-09-05</p>
+            </div>
+        </section>
+        
+        <section id="visualizations" class="bg-white p-6 rounded-lg shadow-md mb-8">
+            <h2 class="text-2xl font-bold text-slate-800 mb-4 text-center">Primary Model Distribution</h2>
+             <p class="text-center text-slate-600 mb-4">This chart shows the number of prompts assigned to each primary Large Language Model. It provides a quick overview of our reliance on different AI providers for core functionalities.</p>
+            <div class="chart-container">
+                <canvas id="modelChart"></canvas>
+            </div>
+        </section>
+
+        <main>
+            <div id="controls" class="bg-white p-6 rounded-lg shadow-md mb-8 flex flex-col md:flex-row gap-4 items-center justify-center">
+                <div class="w-full md:w-auto">
+                    <label for="category-filter" class="block text-sm font-medium text-slate-700">Filter by Category:</label>
+                    <select id="category-filter" class="mt-1 block w-full md:w-64 rounded-md border-gray-300 shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50">
+                        <option value="all">All Categories</option>
+                    </select>
+                </div>
+                <div class="w-full md:w-auto">
+                    <label for="model-filter" class="block text-sm font-medium text-slate-700">Filter by Primary Model:</label>
+                    <select id="model-filter" class="mt-1 block w-full md:w-64 rounded-md border-gray-300 shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50">
+                        <option value="all">All Models</option>
+                    </select>
+                </div>
+            </div>
+
+            <section id="prompt-gallery">
+                 <div class="text-center mb-6">
+                     <h2 class="text-2xl font-bold text-slate-800">Prompt Library</h2>
+                     <p class="text-slate-600 mt-1">Here you can browse all audited prompts. Use the filters above to narrow your search and click 'View Details' to see the full content and metadata for any prompt.</p>
+                </div>
+                <div id="prompt-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                </div>
+            </section>
+        </main>
+        
+        <div id="prompt-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center p-4">
+            <div class="bg-white rounded-lg shadow-xl w-full max-w-4xl modal-content overflow-y-auto">
+                <div class="sticky top-0 bg-white p-4 border-b flex justify-between items-center">
+                    <h2 id="modal-title" class="text-2xl font-bold text-slate-800">Prompt Details</h2>
+                    <button id="close-modal" class="text-gray-500 hover:text-gray-800 text-2xl font-bold">&times;</button>
+                </div>
+                <div class="p-6">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4 text-sm">
+                        <div class="bg-slate-50 p-3 rounded"><strong>ID:</strong> <span id="modal-id"></span></div>
+                        <div class="bg-slate-50 p-3 rounded"><strong>Category:</strong> <span id="modal-category"></span></div>
+                        <div class="bg-slate-50 p-3 rounded col-span-1 md:col-span-2"><strong>Feature/Module:</strong> <span id="modal-feature"></span></div>
+                        <div class="bg-slate-50 p-3 rounded col-span-1 md:col-span-2"><strong>File Location:</strong> <code id="modal-file" class="text-purple-700"></code></div>
+                        <div class="bg-slate-50 p-3 rounded"><strong>Last Updated:</strong> <span id="modal-updated"></span></div>
+                        <div class="bg-slate-50 p-3 rounded"><strong>Last Reviewed:</strong> <span id="modal-reviewed"></span></div>
+                    </div>
+                     <div class="mb-4">
+                        <h3 class="font-semibold text-lg text-slate-700 mb-2">Model Configuration</h3>
+                        <div class="space-y-2 text-sm">
+                            <p><strong>Primary Model:</strong> <span id="modal-primary" class="font-mono bg-green-100 text-green-800 px-2 py-1 rounded"></span></p>
+                            <p><strong>Secondary Model:</strong> <span id="modal-secondary" class="font-mono bg-yellow-100 text-yellow-800 px-2 py-1 rounded"></span></p>
+                            <p><strong>Fallback Model:</strong> <span id="modal-fallback" class="font-mono bg-red-100 text-red-800 px-2 py-1 rounded"></span></p>
+                        </div>
+                    </div>
+                    <div>
+                        <h3 class="font-semibold text-lg text-slate-700 mb-2">Prompt Content</h3>
+                        <pre class="bg-gray-900 text-white p-4 rounded-md text-sm whitespace-pre-wrap overflow-x-auto"><code id="modal-content"></code></pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const promptData = [
+            {
+                "Prompt ID": "TR-1", "Category": "Text Rewriting", "Approach/Name": "Segment Rewrite - Approach 1 (Word-Level Timing Optimization)", "Feature/Module": "Text Segment Rewriting - TTS Optimization", "File Location": "src/trigger/Text/segment_rewrite_llm-prompts/approach1.ts", "Last Updated": "2025-09-03", "Last Reviewed": "2025-09-05", "Primary Model": "Google Gemini-2.0-Flash", "Secondary Model": "OpenAI GPT-4o", "Fallback Model": "Anthropic Claude-3.5-Sonnet-20241022 (temporarily disabled)",
+                "Prompt Content": `You are an expert in language editing and TTS optimization. Your task is to rewrite a transcript segment so that, when processed by a text-to-speech (TTS) engine, the spoken duration will closely match the original human timing. Follow these guidelines precisely:\n\n1. **Preserve Core Content and Tone:**\n   - Do not change the instructional message or key information\n   - Maintain the casual, professional style evident in the overall transcript\n\n2. **Utilize Word-Level Timings:**\n   - Each word object includes a "gap_after" field indicating the pause duration after that word\n   - Use these gap values to identify natural pause points\n   - Insert punctuation (commas, ellipses, dashes) or minimal filler words at these points\n\n3. **Duration Target:**\n   - Original human duration: [DYNAMIC] seconds\n   - Current TTS duration: [DYNAMIC] seconds\n   - Additional time needed: [DYNAMIC] seconds\n   - Target word count increase: ~[DYNAMIC] words\n\n4. **Punctuation and Filler Strategy:**\n   - For gaps < 0.5s: Use punctuation (comma, ellipsis)\n   - For gaps \u2265 0.5s: Add minimal filler words\n   - Ensure natural flow and rhythm\n\n5. **Word-Level Timing Data:**\n[DYNAMIC JSON DATA]\n\nOriginal text to modify:\n"[DYNAMIC TEXT]"\n\nPlease provide only the rewritten text that:\n1. Matches the target duration through strategic punctuation and minimal fillers\n2. Preserves the original meaning and tone\n3. Sounds natural when spoken by TTS\n4. Uses the word-level gap timings to guide placement of pauses`
+            },
+            {
+                "Prompt ID": "TR-2", "Category": "Text Rewriting", "Approach/Name": "Segment Rewrite - Approach 2 (Context-Aware Transitions)", "Feature/Module": "Text Segment Rewriting - Context-Aware", "File Location": "src/trigger/Text/segment_rewrite_llm-prompts/approach2.ts", "Last Updated": "2025-09-03", "Last Reviewed": "2025-09-05", "Primary Model": "Google Gemini-2.0-Flash", "Secondary Model": "OpenAI GPT-4o", "Fallback Model": "Anthropic Claude-3.5-Sonnet-20241022 (temporarily disabled)",
+                "Prompt Content": `You are an expert in language editing and TTS optimization. Your task is to rewrite a transcript segment while considering its context and optimizing for TTS timing. This approach focuses on natural transitions and speech flow.\n\n1. **Context Analysis:**\n   - Previous segments: [DYNAMIC CONTEXT]\n   - Current segment [DYNAMIC ID]: "[DYNAMIC TEXT]"\n   - Following segments: [DYNAMIC CONTEXT]\n\n2. **Duration Requirements:**\n   - Original duration: [DYNAMIC] seconds\n   - Current TTS duration: [DYNAMIC] seconds\n   - Additional time needed: [DYNAMIC] seconds\n   - Target word increase: ~[DYNAMIC] words\n\n3. **Natural Flow Guidelines:**\n   - Create smooth transitions from previous segments\n   - Use discourse markers appropriate to the context\n   - Maintain consistent speaking style and tone\n   - Add natural pauses where appropriate\n\n4. **Rewrite Strategy:**\n   - Focus on conversational coherence\n   - Use transitional phrases that connect ideas\n   - Expand content naturally based on context\n   - Preserve instructional clarity\n\nPlease provide only the rewritten text that:\n1. Adds approximately [DYNAMIC] words through natural elaboration\n2. Creates smooth transitions with surrounding segments\n3. Maintains the speaker's style and tone\n4. Preserves all factual information\n5. Sounds natural when spoken by TTS`
+            },
+            {
+                "Prompt ID": "TR-3", "Category": "Text Rewriting", "Approach/Name": "Segment Rewrite - Approach 3 (Style-Preserving Elaboration)", "Feature/Module": "Text Segment Rewriting - Style Preservation", "File Location": "src/trigger/Text/segment_rewrite_llm-prompts/approach3.ts", "Last Updated": "2025-09-03", "Last Reviewed": "2025-09-05", "Primary Model": "Google Gemini-2.0-Flash", "Secondary Model": "OpenAI GPT-4o", "Fallback Model": "Anthropic Claude-3.5-Sonnet-20241022 (temporarily disabled)",
+                "Prompt Content": `You are an expert in language editing and TTS optimization. Your task is to rewrite a transcript segment to match a specific duration target by adding words while preserving the speaker's unique style.\n\n1. **Original Content:**\n"[DYNAMIC TEXT]"\n\n2. **Duration Analysis:**\n   - Original duration: [DYNAMIC] seconds\n   - Current TTS duration: [DYNAMIC] seconds\n   - Additional time needed: [DYNAMIC] seconds\n   - Target word increase: ~[DYNAMIC] words\n\n3. **Style Guidelines:**\n   - Maintain the speaker's casual, instructional tone\n   - Keep the same level of technical detail\n   - Use similar vocabulary and phrasing patterns\n   - Preserve the natural speaking rhythm\n\n4. **Content Rules:**\n   - Do not invent new facts or details\n   - Only elaborate on existing information\n   - Keep the core message unchanged\n   - Ensure all added content is factually consistent\n\nPlease provide only the rewritten text that:\n1. Adds approximately [DYNAMIC] words\n2. Maintains the speaker's exact style and tone\n3. Preserves all factual information\n4. Elaborates naturally on the existing content\n5. Sounds authentic when spoken aloud`
+            },
+            {
+                "Prompt ID": "CT-1", "Category": "Cross-Linguistic Translation", "Approach/Name": "Segment Translation - Approach 1 (Advanced Linguistic Framework)", "Feature/Module": "Cross-Linguistic Translation with TTS Optimization", "File Location": "src/trigger/Text/segment_translator_llm-prompts/approach1.ts", "Last Updated": "2025-09-03", "Last Reviewed": "2025-09-05", "Primary Model": "Google Gemini-2.0-Flash", "Secondary Model": "OpenAI GPT-4o", "Fallback Model": "Anthropic Claude-3.5-Sonnet-20241022 (temporarily disabled)",
+                "Prompt Content": `You are an expert in cross-linguistic translation and TTS optimization, with deep understanding of linguistic structures across multiple language families. Your task is to translate a transcript segment to [TARGET_LANGUAGE] and adapt the translation for the [TARGET_REGION] region, then rewrite the translated segment so that, when processed by a text-to-speech (TTS) engine, the spoken duration will closely match the original human timing. Follow these guidelines precisely:\n\n1. **Cross-Linguistic Translation Framework:**\n   - Translate the original text to [TARGET_LANGUAGE], ensuring the translation reflects the nuances and vocabulary of the [TARGET_REGION] region.\n   - Apply multi-level linguistic knowledge (morphological, syntactic, semantic, pragmatic) to preserve the original meaning while respecting target language structures.\n   - Maintain the casual, professional style evident in the overall transcript, mirroring the speaker's tone and vocabulary choices while adapting to cultural norms of the target language.\n   - **Important:** The translation must prioritize clarity and naturalness for TTS output in the target language/region while staying true to the speaker's original style and intent.\n\n2. **Structural Linguistic Adaptation:**\n   - **Morphosyntactic Adjustment:** Adapt between languages with different word order patterns (SVO, SOV, VSO), ensuring proper restructuring while preserving semantic relationships.\n   - **Idiomatic Equivalence:** Replace source language idioms and expressions with natural target language equivalents rather than literal translations.\n   - **Cohesion Markers:** Appropriately transform discourse connectors, demonstratives, and reference markers to maintain textual cohesion in the target language's natural patterns.\n\n3. **Grammatical Gender and Reference System Handling:**\n   - When translating BETWEEN languages with different gender systems:\n     - For translations TO English: Use neutral pronouns ("it") for inanimate objects, concepts, and abstract nouns, regardless of their grammatical gender in the source language. Only use gendered pronouns ("he/she") when referring to people or animals with known gender.\n     - For translations FROM English: Apply the appropriate grammatical gender according to the target language's rules, maintaining consistency with gender agreement throughout the translation.\n     - For translations BETWEEN gendered languages: Properly transform gender markers according to each language's grammatical system.\n   - Account for languages with honorific systems (Japanese, Korean) or T-V distinctions (Spanish, French, German) by selecting appropriate formality levels based on context.\n\n4. **TTS Optimization:**\n   - Original human duration: [DYNAMIC] seconds\n   - Current TTS duration: [DYNAMIC] seconds\n   - Additional time needed: [DYNAMIC] seconds\n   - Target word count increase: ~[DYNAMIC] words\n\n5. **Punctuation and Pause Strategy:**\n   - For gaps < 0.5s: Use punctuation appropriate to the target language (comma, ellipsis)\n   - For gaps \u2265 0.5s: Add minimal filler words natural to the target language\n   - Ensure natural flow and rhythm according to the target language's prosodic patterns\n   - Account for languages with different pause patterns (e.g., Japanese uses particles rather than spaces)\n\n6. **Register and Cultural Adaptation:**\n   - Preserve the register level (formal, informal, casual, technical) appropriate to the context\n   - Adapt culturally-specific references to maintain equivalent impact in the target language/region\n   - For regional variants (e.g., Brazilian vs. European Portuguese, Latin American vs. European Spanish), use vocabulary, expressions, and syntax specific to the target region\n\n7. **Word-Level Timing Data:**\n[DYNAMIC JSON DATA]\n\nOriginal text to modify:\n"[DYNAMIC TEXT]"\n\nPlease provide only the rewritten text that:\n1. Is accurately translated to [TARGET_LANGUAGE] and adapted for the [TARGET_REGION] region, maintaining the speaker's original style.\n2. Correctly handles grammatical structures, reference systems, and cultural nuances between the source and target languages.\n3. Matches the target duration through strategic punctuation and minimal fillers appropriate to the target language.\n4. Preserves the original meaning, tone, and communicative intent of the *original* text.\n5. Sounds natural when spoken by TTS in the target language.\n6. Uses the word-level gap timings to guide placement of pauses in a way that respects the target language's natural rhythm.`
+            },
+            {
+                "Prompt ID": "CT-2", "Category": "Cross-Linguistic Translation", "Approach/Name": "Segment Translation - Approach 2 (Context-Aware Translation)", "Feature/Module": "Context-Aware Cross-Linguistic Translation", "File Location": "src/trigger/Text/segment_translator_llm-prompts/approach2.ts", "Last Updated": "2025-09-03", "Last Reviewed": "2025-09-05", "Primary Model": "OpenAI GPT-4o", "Secondary Model": "Google Gemini-2.0-Flash", "Fallback Model": "Anthropic Claude-3.5-Sonnet-20241022 (temporarily disabled)",
+                "Prompt Content": `You are an expert in language editing, translation, and TTS optimization. Your task is to translate a transcript segment to [TARGET_LANGUAGE] and adapt the translation for the [TARGET_REGION] region, then rewrite the translated segment while considering its context and optimizing for TTS timing. This approach focuses on natural transitions and speech flow.\n\n1. **Translation and Style Adaptation:**\n   - Translate the original text AND the surrounding context segments to [TARGET_LANGUAGE], ensuring the translation reflects the nuances and vocabulary of the [TARGET_REGION] region.\n   - Maintain the casual, professional style evident in the overall transcript, mirroring the speaker's tone and vocabulary choices. Refer to the provided context segments to understand the speaker's style and ensure consistency. The translation should retain the speaking style.\n   - **Important:** The translation must prioritize clarity and naturalness for TTS output in the target language/region, preserving the speaker's style and ensuring smooth transitions between segments.\n\n2. **Context Analysis (Translated):**\n   - Previous segments: [DYNAMIC CONTEXT]\n   - Current segment [DYNAMIC ID]: "[DYNAMIC TEXT]"\n   - Following segments: [DYNAMIC CONTEXT]\n\n3. **Duration Requirements:**\n   - Original duration: [DYNAMIC] seconds\n   - Current TTS duration: [DYNAMIC] seconds\n   - Additional time needed: [DYNAMIC] seconds\n   - Target word increase: ~[DYNAMIC] words\n\n4. **Natural Flow Guidelines:**\n   - Create smooth transitions from previous segments\n   - Use discourse markers appropriate to the context in [TARGET_LANGUAGE]\n   - Maintain consistent speaking style and tone in [TARGET_LANGUAGE]\n   - Add natural pauses where appropriate\n\n5. **Rewrite Strategy:**\n   - Focus on conversational coherence\n   - Use transitional phrases that connect ideas\n   - Expand content naturally based on context\n   - Preserve instructional clarity\n\nPlease provide only the rewritten text that:\n1. Is accurately translated to [TARGET_LANGUAGE] and adapted for the [TARGET_REGION] region, maintaining the speaker's original style.\n2. Adds approximately [DYNAMIC] words through natural elaboration\n3. Creates smooth transitions with surrounding segments\n4. Maintains the speaker's style and tone in [TARGET_LANGUAGE]\n5. Preserves all factual information\n6. Sounds natural when spoken by TTS`
+            },
+            {
+                "Prompt ID": "CT-3", "Category": "Cross-Linguistic Translation", "Approach/Name": "Segment Translation - Approach 3 (Style-Preserving Translation)", "Feature/Module": "Style-Preserving Cross-Linguistic Translation", "File Location": "src/trigger/Text/segment_translator_llm-prompts/approach3.ts", "Last Updated": "2025-09-03", "Last Reviewed": "2025-09-05", "Primary Model": "OpenAI GPT-4o", "Secondary Model": "Google Gemini-2.0-Flash", "Fallback Model": "Anthropic Claude-3.5-Sonnet-20241022 (temporarily disabled)",
+                "Prompt Content": `You are an expert in language editing, translation, and TTS optimization. Your task is to translate a transcript segment to [TARGET_LANGUAGE] and adapt the translation for the [TARGET_REGION] region, then rewrite the translated segment to match a specific duration target by adding words while preserving the speaker's unique style.\n\n1. **Translation and Style Adaptation:**\n   - Translate the original text to [TARGET_LANGUAGE], ensuring the translation reflects the nuances and vocabulary of the [TARGET_REGION] region.\n   - Maintain the casual, instructional tone, mirroring the speaker's vocabulary choices and phrasing patterns. Refer to the provided full transcript context to understand the speaker's style. The translation should sound as if the speaker were naturally speaking in [TARGET_LANGUAGE].\n   - **Important:** The translation must prioritize clarity and naturalness for TTS output in the target language/region, faithfully replicating the speaker's individual style.\n\n2. **Original Content (To be Translated):**\n"[DYNAMIC TEXT]"\n\n3. **Duration Analysis:**\n   - Original duration: [DYNAMIC] seconds\n   - Current TTS duration: [DYNAMIC] seconds\n   - Additional time needed: [DYNAMIC] seconds\n   - Target word increase: ~[DYNAMIC] words\n\n4. **Style Guidelines (Translated):**\n   - Maintain the speaker's casual, instructional tone in [TARGET_LANGUAGE]\n   - Keep the same level of technical detail\n   - Use similar vocabulary and phrasing patterns in [TARGET_LANGUAGE]\n   - Preserve the natural speaking rhythm\n\n5. **Content Rules:**\n   - Do not invent new facts or details\n   - Only elaborate on existing information\n   - Keep the core message unchanged\n   - Ensure all added content is factually consistent\n\nPlease provide only the rewritten text that:\n1. Is accurately translated to [TARGET_LANGUAGE] and adapted for the [TARGET_REGION] region, maintaining the speaker's original style.\n2. Adds approximately [DYNAMIC] words\n3. Maintains the speaker's exact style and tone in [TARGET_LANGUAGE]\n4. Preserves all factual information\n5. Elaborates naturally on the existing content\n6. Sounds authentic when spoken aloud`
+            }
+        ];
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const promptGrid = document.getElementById('prompt-grid');
+            const categoryFilter = document.getElementById('category-filter');
+            const modelFilter = document.getElementById('model-filter');
+            const modal = document.getElementById('prompt-modal');
+            const closeModalBtn = document.getElementById('close-modal');
+
+            let modelChart;
+
+            function getUniqueValues(key) {
+                const values = promptData.map(p => p[key]);
+                return [...new Set(values)];
+            }
+
+            function populateFilters() {
+                const categories = getUniqueValues('Category');
+                categories.forEach(cat => {
+                    const option = document.createElement('option');
+                    option.value = cat;
+                    option.textContent = cat;
+                    categoryFilter.appendChild(option);
+                });
+
+                const models = getUniqueValues('Primary Model');
+                models.forEach(model => {
+                    const option = document.createElement('option');
+                    option.value = model;
+                    option.textContent = model;
+                    modelFilter.appendChild(option);
+                });
+            }
+
+            function renderPrompts(filteredData) {
+                promptGrid.innerHTML = '';
+                if (filteredData.length === 0) {
+                    promptGrid.innerHTML = `<p class="text-center text-slate-500 col-span-full">No prompts match the current filters.</p>`;
+                    return;
+                }
+                filteredData.forEach(prompt => {
+                    const card = document.createElement('div');
+                    card.className = 'bg-white p-6 rounded-lg shadow-md flex flex-col justify-between';
+                    card.innerHTML = `
+                        <div>
+                            <div class="flex justify-between items-start mb-2">
+                                <span class="px-2 py-1 text-xs font-semibold text-purple-800 bg-purple-100 rounded-full">${prompt['Category']}</span>
+                                <span class="text-xs font-bold text-slate-600">${prompt['Prompt ID']}</span>
+                            </div>
+                            <h3 class="text-lg font-bold text-slate-800 mb-2">${prompt['Approach/Name']}</h3>
+                            <p class="text-sm text-slate-600 mb-4 h-16">${prompt['Feature/Module']}</p>
+                        </div>
+                        <div class="border-t pt-4">
+                            <p class="text-xs text-slate-500 mb-4">Last Updated: ${prompt['Last Updated']}</p>
+                            <button data-id="${prompt['Prompt ID']}" class="view-details-btn w-full bg-blue-600 text-white py-2 rounded-md hover:bg-blue-700 transition-colors">View Details</button>
+                        </div>
+                    `;
+                    promptGrid.appendChild(card);
+                });
+            }
+            
+            function updateKPIs() {
+                document.getElementById('total-prompts').textContent = promptData.length;
+                document.getElementById('total-categories').textContent = getUniqueValues('Category').length;
+            }
+
+            function renderChart() {
+                const ctx = document.getElementById('modelChart').getContext('2d');
+                const modelCounts = promptData.reduce((acc, curr) => {
+                    acc[curr['Primary Model']] = (acc[curr['Primary Model']] || 0) + 1;
+                    return acc;
+                }, {});
+
+                const labels = Object.keys(modelCounts);
+                const data = Object.values(modelCounts);
+                
+                if (modelChart) {
+                    modelChart.destroy();
+                }
+
+                modelChart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: '# of Prompts',
+                            data: data,
+                            backgroundColor: 'rgba(75, 122, 192, 0.6)',
+                            borderColor: 'rgba(75, 122, 192, 1)',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        indexAxis: 'y',
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            x: {
+                                beginAtZero: true,
+                                ticks: {
+                                    stepSize: 1
+                                }
+                            }
+                        },
+                        plugins: {
+                            legend: {
+                                display: false
+                            }
+                        }
+                    }
+                });
+            }
+
+            function filterAndRender() {
+                const category = categoryFilter.value;
+                const model = modelFilter.value;
+
+                const filteredData = promptData.filter(p => {
+                    const categoryMatch = category === 'all' || p['Category'] === category;
+                    const modelMatch = model === 'all' || p['Primary Model'] === model;
+                    return categoryMatch && modelMatch;
+                });
+                renderPrompts(filteredData);
+            }
+
+            function showModal(promptId) {
+                const prompt = promptData.find(p => p['Prompt ID'] === promptId);
+                if (!prompt) return;
+
+                document.getElementById('modal-title').textContent = prompt['Approach/Name'];
+                document.getElementById('modal-id').textContent = prompt['Prompt ID'];
+                document.getElementById('modal-category').textContent = prompt['Category'];
+                document.getElementById('modal-feature').textContent = prompt['Feature/Module'];
+                document.getElementById('modal-file').textContent = prompt['File Location'];
+                document.getElementById('modal-updated').textContent = prompt['Last Updated'];
+                document.getElementById('modal-reviewed').textContent = prompt['Last Reviewed'];
+                document.getElementById('modal-primary').textContent = prompt['Primary Model'];
+                document.getElementById('modal-secondary').textContent = prompt['Secondary Model'];
+                document.getElementById('modal-fallback').textContent = prompt['Fallback Model'];
+                document.getElementById('modal-content').textContent = prompt['Prompt Content'];
+
+                modal.classList.remove('hidden');
+                modal.classList.add('flex');
+            }
+
+            function hideModal() {
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+            }
+
+            categoryFilter.addEventListener('change', filterAndRender);
+            modelFilter.addEventListener('change', filterAndRender);
+            
+            promptGrid.addEventListener('click', (e) => {
+                if (e.target.classList.contains('view-details-btn')) {
+                    const promptId = e.target.dataset.id;
+                    showModal(promptId);
+                }
+            });
+
+            closeModalBtn.addEventListener('click', hideModal);
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    hideModal();
+                }
+            });
+            
+            updateKPIs();
+            populateFilters();
+            renderPrompts(promptData);
+            renderChart();
+        });
+    </script>
+</body>
+</html>
